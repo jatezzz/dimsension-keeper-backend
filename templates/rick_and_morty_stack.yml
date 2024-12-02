@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Rick and Morty App Backend Stack
+
+Parameters:
+  LambdaS3Bucket:
+    Type: String
+    Description: S3 bucket where the Lambda code is stored.
+  LambdaS3Key:
+    Type: String
+    Description: S3 key for the Lambda code bundle.
+
+Resources:
+  CharacterLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaDynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource: "arn:aws:dynamodb:*:*:table/RickAndMortyCharacters"
+
+  CharacterLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CharacterHandler
+      Runtime: nodejs14.x
+      Role: !GetAtt CharacterLambdaRole.Arn
+      Handler: character_handler.handler
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
+      Timeout: 30
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: RickAndMortyApi
+      Description: API for managing Rick and Morty characters.
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: characters
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayMethodPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+          - Region: !Ref "AWS::Region"
+            LambdaArn: !GetAtt CharacterLambdaFunction.Arn
+
+Outputs:
+  ApiGatewayUrl:
+    Description: Base URL for the API Gateway
+    Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/characters"
